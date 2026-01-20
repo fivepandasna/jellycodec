@@ -74,7 +74,7 @@ class JellyfinCodecAnalyzer:
         params = {
             'Recursive': 'true',
             'IncludeItemTypes': 'Movie,Episode',
-            'Fields': 'MediaStreams,Path',
+            'Fields': 'MediaStreams,Path,MediaSources',
         }
         
         try:
@@ -125,6 +125,29 @@ class JellyfinCodecAnalyzer:
             print(f"Error fetching items: {type(e).__name__}: {e}", file=sys.stderr)
             return []
     
+    def get_file_size(self, item: Dict) -> int:
+        """Extract file size in bytes from an item"""
+        # Try MediaSources first (most reliable)
+        media_sources = item.get('MediaSources', [])
+        if media_sources and len(media_sources) > 0:
+            size = media_sources[0].get('Size', 0)
+            if size:
+                return size
+        
+        # Fallback to RunTimeTicks estimation (very rough)
+        return 0
+    
+    def format_size(self, bytes_size: int) -> str:
+        """Format bytes to human readable size"""
+        if bytes_size == 0:
+            return "Unknown"
+        
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if bytes_size < 1024.0:
+                return f"{bytes_size:.2f} {unit}"
+            bytes_size /= 1024.0
+        return f"{bytes_size:.2f} PB"
+    
     def get_video_codec(self, item: Dict) -> str:
         """Extract video codec from an item"""
         media_streams = item.get('MediaStreams', [])
@@ -149,9 +172,9 @@ class JellyfinCodecAnalyzer:
                 return codec_map.get(codec, codec)
         return 'Unknown'
     
-    def analyze_codecs(self, items: List[Dict]) -> Dict[str, int]:
+    def analyze_codecs(self, items: List[Dict]) -> Dict[str, Dict]:
         """Analyze video codecs from items"""
-        codec_counter = Counter()
+        codec_data = {}
         items_without_codec = 0
         items_without_streams = 0
         
@@ -163,10 +186,15 @@ class JellyfinCodecAnalyzer:
                 continue
             
             codec = self.get_video_codec(item)
+            file_size = self.get_file_size(item)
+            
             if codec == 'Unknown':
                 items_without_codec += 1
             else:
-                codec_counter[codec] += 1
+                if codec not in codec_data:
+                    codec_data[codec] = {'count': 0, 'total_size': 0}
+                codec_data[codec]['count'] += 1
+                codec_data[codec]['total_size'] += file_size
         
         if items_without_streams > 0:
             print(f"Warning: {items_without_streams} items have no media stream data", file=sys.stderr)
@@ -174,31 +202,43 @@ class JellyfinCodecAnalyzer:
         if items_without_codec > 0:
             print(f"Warning: {items_without_codec} items have no video codec info", file=sys.stderr)
         
-        return dict(codec_counter)
+        return codec_data
     
-    def print_results(self, codec_stats: Dict[str, int], detailed: bool = False):
+    def print_results(self, codec_data: Dict[str, Dict], detailed: bool = False):
         """Print codec statistics"""
-        if not codec_stats:
+        if not codec_data:
             print("No video codecs found")
             return
         
-        total = sum(codec_stats.values())
-        print(f"\n{'='*50}")
+        total_count = sum(data['count'] for data in codec_data.values())
+        total_size = sum(data['total_size'] for data in codec_data.values())
+        
+        print(f"\n{'='*70}")
         print(f"Video Codec Statistics")
-        print(f"{'='*50}")
-        print(f"Total videos analyzed: {total}\n")
+        print(f"{'='*70}")
+        print(f"Total videos analyzed: {total_count}")
+        print(f"Total size: {self.format_size(total_size)}\n")
         
         # Sort by count (descending)
-        sorted_codecs = sorted(codec_stats.items(), key=lambda x: x[1], reverse=True)
+        sorted_codecs = sorted(codec_data.items(), key=lambda x: x[1]['count'], reverse=True)
         
-        for codec, count in sorted_codecs:
-            percentage = (count / total * 100) if total > 0 else 0
-            if detailed:
-                print(f"{count:>6} {codec:<20} ({percentage:>5.1f}%)")
-            else:
-                print(f"{count:>6} {codec}")
+        if detailed:
+            print(f"{'Count':<8} {'Codec':<20} {'Size':<15} {'Percentage':<10}")
+            print(f"{'-'*70}")
+            for codec, data in sorted_codecs:
+                count = data['count']
+                size = data['total_size']
+                percentage = (count / total_count * 100) if total_count > 0 else 0
+                print(f"{count:<8} {codec:<20} {self.format_size(size):<15} {percentage:>5.1f}%")
+        else:
+            print(f"{'Count':<8} {'Codec':<20} {'Size':<15}")
+            print(f"{'-'*70}")
+            for codec, data in sorted_codecs:
+                count = data['count']
+                size = data['total_size']
+                print(f"{count:<8} {codec:<20} {self.format_size(size):<15}")
         
-        print(f"{'='*50}\n")
+        print(f"{'='*70}\n")
     
     def list_files_by_codec(self, items: List[Dict], codec_filter: str = None):
         """List all files, optionally filtered by codec"""
@@ -211,49 +251,70 @@ class JellyfinCodecAnalyzer:
             
             name = item.get('Name', 'Unknown')
             path = item.get('Path', 'No path')
-            codec_groups[codec].append({'name': name, 'path': path})
+            size = self.get_file_size(item)
+            codec_groups[codec].append({'name': name, 'path': path, 'size': size})
         
         if codec_filter:
             if codec_filter in codec_groups:
+                files = codec_groups[codec_filter]
+                total_size = sum(f['size'] for f in files)
+                
                 print(f"\n{'='*70}")
                 print(f"Files with codec: {codec_filter}")
+                print(f"Total: {len(files)} files, {self.format_size(total_size)}")
                 print(f"{'='*70}")
-                for file_info in sorted(codec_groups[codec_filter], key=lambda x: x['name']):
+                for file_info in sorted(files, key=lambda x: x['name']):
                     print(f"\n{file_info['name']}")
+                    print(f"  Size: {self.format_size(file_info['size'])}")
                     print(f"  Path: {file_info['path']}")
-                print(f"\n{'='*70}")
-                print(f"Total: {len(codec_groups[codec_filter])} files\n")
+                print(f"\n{'='*70}\n")
             else:
                 print(f"\nNo files found with codec: {codec_filter}\n")
         else:
             for codec in sorted(codec_groups.keys()):
+                files = codec_groups[codec]
+                total_size = sum(f['size'] for f in files)
+                
                 print(f"\n{'='*70}")
-                print(f"Codec: {codec} ({len(codec_groups[codec])} files)")
+                print(f"Codec: {codec} ({len(files)} files, {self.format_size(total_size)})")
                 print(f"{'='*70}")
-                for file_info in sorted(codec_groups[codec], key=lambda x: x['name']):
+                for file_info in sorted(files, key=lambda x: x['name']):
                     print(f"\n{file_info['name']}")
+                    print(f"  Size: {self.format_size(file_info['size'])}")
                     print(f"  Path: {file_info['path']}")
     
-    def save_results(self, codec_stats: Dict[str, int], filename: str, detailed: bool = False):
+    def save_results(self, codec_data: Dict[str, Dict], filename: str, detailed: bool = False):
         """Save codec statistics to file"""
         try:
             with open(filename, 'w') as f:
-                total = sum(codec_stats.values())
-                f.write(f"{'='*50}\n")
+                total_count = sum(data['count'] for data in codec_data.values())
+                total_size = sum(data['total_size'] for data in codec_data.values())
+                
+                f.write(f"{'='*70}\n")
                 f.write(f"Video Codec Statistics\n")
-                f.write(f"{'='*50}\n")
-                f.write(f"Total videos analyzed: {total}\n\n")
+                f.write(f"{'='*70}\n")
+                f.write(f"Total videos analyzed: {total_count}\n")
+                f.write(f"Total size: {self.format_size(total_size)}\n\n")
                 
-                sorted_codecs = sorted(codec_stats.items(), key=lambda x: x[1], reverse=True)
+                sorted_codecs = sorted(codec_data.items(), key=lambda x: x[1]['count'], reverse=True)
                 
-                for codec, count in sorted_codecs:
-                    percentage = (count / total * 100) if total > 0 else 0
-                    if detailed:
-                        f.write(f"{count:>6} {codec:<20} ({percentage:>5.1f}%)\n")
-                    else:
-                        f.write(f"{count:>6} {codec}\n")
+                if detailed:
+                    f.write(f"{'Count':<8} {'Codec':<20} {'Size':<15} {'Percentage':<10}\n")
+                    f.write(f"{'-'*70}\n")
+                    for codec, data in sorted_codecs:
+                        count = data['count']
+                        size = data['total_size']
+                        percentage = (count / total_count * 100) if total_count > 0 else 0
+                        f.write(f"{count:<8} {codec:<20} {self.format_size(size):<15} {percentage:>5.1f}%\n")
+                else:
+                    f.write(f"{'Count':<8} {'Codec':<20} {'Size':<15}\n")
+                    f.write(f"{'-'*70}\n")
+                    for codec, data in sorted_codecs:
+                        count = data['count']
+                        size = data['total_size']
+                        f.write(f"{count:<8} {codec:<20} {self.format_size(size):<15}\n")
                 
-                f.write(f"{'='*50}\n")
+                f.write(f"{'='*70}\n")
             
             print(f"Results saved to {filename}")
         except PermissionError:
@@ -278,22 +339,23 @@ class JellyfinCodecAnalyzer:
                 
                 name = item.get('Name', 'Unknown')
                 path = item.get('Path', 'No path')
-                codec_groups[codec].append({'name': name, 'path': path, 'codec': codec})
+                size = self.get_file_size(item)
+                codec_groups[codec].append({'name': name, 'path': path, 'codec': codec, 'size': size, 'size_formatted': self.format_size(size)})
             
             if format_type == 'csv':
                 import csv
                 with open(filename, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['Name', 'Codec', 'Path'])
+                    writer.writerow(['Name', 'Codec', 'Size (Bytes)', 'Size', 'Path'])
                     
                     if codec_filter:
                         if codec_filter in codec_groups:
                             for file_info in sorted(codec_groups[codec_filter], key=lambda x: x['name']):
-                                writer.writerow([file_info['name'], file_info['codec'], file_info['path']])
+                                writer.writerow([file_info['name'], file_info['codec'], file_info['size'], file_info['size_formatted'], file_info['path']])
                     else:
                         for codec in sorted(codec_groups.keys()):
                             for file_info in sorted(codec_groups[codec], key=lambda x: x['name']):
-                                writer.writerow([file_info['name'], file_info['codec'], file_info['path']])
+                                writer.writerow([file_info['name'], file_info['codec'], file_info['size'], file_info['size_formatted'], file_info['path']])
             
             else:  # json format
                 output_data = []
@@ -367,7 +429,9 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
         elif choice == '4':
             print("\nAvailable codecs:")
             for i, codec in enumerate(sorted(codec_stats.keys()), 1):
-                print(f"  {i}. {codec} ({codec_stats[codec]} files)")
+                count = codec_stats[codec]['count']
+                size = codec_stats[codec]['total_size']
+                print(f"  {i}. {codec} ({count} files, {analyzer.format_size(size)})")
             
             codec_choice = input("\nEnter codec name or number: ").strip()
             
@@ -417,7 +481,9 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
             elif save_choice == '2':
                 print("\nAvailable codecs:")
                 for i, codec in enumerate(sorted(codec_stats.keys()), 1):
-                    print(f"  {i}. {codec} ({codec_stats[codec]} files)")
+                    count = codec_stats[codec]['count']
+                    size = codec_stats[codec]['total_size']
+                    print(f"  {i}. {codec} ({count} files, {analyzer.format_size(size)})")
                 
                 codec_choice = input("\nEnter codec name or number: ").strip()
                 

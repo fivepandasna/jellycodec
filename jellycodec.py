@@ -266,43 +266,48 @@ class JellyfinCodecAnalyzer:
         except Exception as e:
             print(f"Error saving to file: {type(e).__name__}: {e}", file=sys.stderr)
     
-    def save_file_list(self, items: List[Dict], filename: str, codec_filter: str = None):
-        """Save file list to file"""
+    def save_file_list(self, items: List[Dict], filename: str, codec_filter: str = None, format_type: str = 'csv'):
+        """Save file list to file in CSV or JSON format"""
         try:
-            with open(filename, 'w') as f:
-                codec_groups = {}
+            codec_groups = {}
+            
+            for item in items:
+                codec = self.get_video_codec(item)
+                if codec not in codec_groups:
+                    codec_groups[codec] = []
                 
-                for item in items:
-                    codec = self.get_video_codec(item)
-                    if codec not in codec_groups:
-                        codec_groups[codec] = []
+                name = item.get('Name', 'Unknown')
+                path = item.get('Path', 'No path')
+                codec_groups[codec].append({'name': name, 'path': path, 'codec': codec})
+            
+            if format_type == 'csv':
+                import csv
+                with open(filename, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['Name', 'Codec', 'Path'])
                     
-                    name = item.get('Name', 'Unknown')
-                    path = item.get('Path', 'No path')
-                    codec_groups[codec].append({'name': name, 'path': path})
-                
+                    if codec_filter:
+                        if codec_filter in codec_groups:
+                            for file_info in sorted(codec_groups[codec_filter], key=lambda x: x['name']):
+                                writer.writerow([file_info['name'], file_info['codec'], file_info['path']])
+                    else:
+                        for codec in sorted(codec_groups.keys()):
+                            for file_info in sorted(codec_groups[codec], key=lambda x: x['name']):
+                                writer.writerow([file_info['name'], file_info['codec'], file_info['path']])
+            
+            else:  # json format
+                output_data = []
                 if codec_filter:
                     if codec_filter in codec_groups:
-                        f.write(f"{'='*70}\n")
-                        f.write(f"Files with codec: {codec_filter}\n")
-                        f.write(f"{'='*70}\n")
-                        for file_info in sorted(codec_groups[codec_filter], key=lambda x: x['name']):
-                            f.write(f"\n{file_info['name']}\n")
-                            f.write(f"  Path: {file_info['path']}\n")
-                        f.write(f"\n{'='*70}\n")
-                        f.write(f"Total: {len(codec_groups[codec_filter])} files\n")
-                    else:
-                        f.write(f"No files found with codec: {codec_filter}\n")
+                        output_data = sorted(codec_groups[codec_filter], key=lambda x: x['name'])
                 else:
                     for codec in sorted(codec_groups.keys()):
-                        f.write(f"\n{'='*70}\n")
-                        f.write(f"Codec: {codec} ({len(codec_groups[codec])} files)\n")
-                        f.write(f"{'='*70}\n")
-                        for file_info in sorted(codec_groups[codec], key=lambda x: x['name']):
-                            f.write(f"\n{file_info['name']}\n")
-                            f.write(f"  Path: {file_info['path']}\n")
+                        output_data.extend(sorted(codec_groups[codec], key=lambda x: x['name']))
+                
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(output_data, f, indent=2, ensure_ascii=False)
             
-            print(f"File list saved to {filename}")
+            print(f"File list saved to {filename} ({format_type.upper()} format)")
         except PermissionError:
             print(f"Error: Permission denied writing to {filename}", file=sys.stderr)
             print("Check file permissions or try a different location", file=sys.stderr)
@@ -381,9 +386,25 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
             analyzer.list_files_by_codec(items, codec_filter)
         
         elif choice == '5':
-            filename = input("Enter filename (default: files.txt): ").strip()
+            filename = input("Enter filename (default: files.csv): ").strip()
             if not filename:
-                filename = "files.txt"
+                filename = "files.csv"
+            
+            print("\nExport format:")
+            print("1. CSV (recommended - easily open in Excel/spreadsheets)")
+            print("2. JSON (for programmatic use)")
+            
+            format_choice = input("\nEnter format choice (1-2, default: 1): ").strip()
+            if not format_choice:
+                format_choice = '1'
+            
+            format_type = 'csv' if format_choice == '1' else 'json'
+            
+            # Adjust filename extension if needed
+            if format_type == 'csv' and not filename.endswith('.csv'):
+                filename = filename.rsplit('.', 1)[0] + '.csv'
+            elif format_type == 'json' and not filename.endswith('.json'):
+                filename = filename.rsplit('.', 1)[0] + '.json'
             
             print("\nSave options:")
             print("1. All files (all codecs)")
@@ -392,7 +413,7 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
             save_choice = input("\nEnter choice (1-2): ").strip()
             
             if save_choice == '1':
-                analyzer.save_file_list(items, filename)
+                analyzer.save_file_list(items, filename, format_type=format_type)
             elif save_choice == '2':
                 print("\nAvailable codecs:")
                 for i, codec in enumerate(sorted(codec_stats.keys()), 1):
@@ -412,7 +433,7 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
                 except ValueError:
                     codec_filter = codec_choice
                 
-                analyzer.save_file_list(items, filename, codec_filter)
+                analyzer.save_file_list(items, filename, codec_filter, format_type=format_type)
             else:
                 print("Invalid choice")
         

@@ -2,6 +2,7 @@
 """
 Jellyfin Codec Analyzer
 Analyzes video codecs in your Jellyfin media library
+Automatically loads JELLYFIN_SERVER and JELLYFIN_API_KEY from .env file
 """
 
 import requests
@@ -12,12 +13,14 @@ from typing import Dict, List
 import sys
 import os
 
-# Try to load .env file if python-dotenv is available
+# Load .env file automatically
 try:
     from dotenv import load_dotenv
     load_dotenv()
+    print("Loaded configuration from .env file", file=sys.stderr)
 except ImportError:
-    pass  # python-dotenv not installed, skip auto-loading
+    print("Note: python-dotenv not installed. Install with: pip install python-dotenv", file=sys.stderr)
+    print("Falling back to environment variables or command-line arguments", file=sys.stderr)
 
 class JellyfinCodecAnalyzer:
     def __init__(self, server_url: str, api_key: str):
@@ -355,10 +358,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  %(prog)s -s http://localhost:8096 -k YOUR_API_KEY
-  %(prog)s -s http://localhost:8096 -k YOUR_API_KEY -i
-  %(prog)s -s http://localhost:8096 -k YOUR_API_KEY -d
-  %(prog)s -s http://localhost:8096 -k YOUR_API_KEY -o codecs.txt
+  %(prog)s                                    # Uses .env file
+  %(prog)s -s http://localhost:8096 -k KEY   # Override .env settings
+  %(prog)s -i                                 # Interactive mode
+  %(prog)s -d                                 # Detailed output
+  %(prog)s -o codecs.txt                      # Save to file
+
+Setup .env file:
+  Create a .env file in the same directory with:
+  JELLYFIN_SERVER=http://localhost:8096
+  JELLYFIN_API_KEY=your_api_key_here
         '''
     )
     
@@ -383,12 +392,20 @@ Examples:
     server = args.server or os.getenv('JELLYFIN_SERVER')
     if not server:
         print("Error: Server URL required. Provide via -s or set JELLYFIN_SERVER env var", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Create a .env file with:", file=sys.stderr)
+        print("  JELLYFIN_SERVER=http://localhost:8096", file=sys.stderr)
+        print("  JELLYFIN_API_KEY=your_api_key_here", file=sys.stderr)
         sys.exit(1)
     
     # Get API key from args or environment
     api_key = args.api_key or os.getenv('JELLYFIN_API_KEY')
     if not api_key:
         print("Error: API key required. Provide via -k or set JELLYFIN_API_KEY env var", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Create a .env file with:", file=sys.stderr)
+        print("  JELLYFIN_SERVER=http://localhost:8096", file=sys.stderr)
+        print("  JELLYFIN_API_KEY=your_api_key_here", file=sys.stderr)
         sys.exit(1)
     
     # Validate URL format

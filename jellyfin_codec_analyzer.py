@@ -10,12 +10,21 @@ import argparse
 from collections import Counter
 from typing import Dict, List
 import sys
+import os
+
+# Try to load .env file if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, skip auto-loading
 
 class JellyfinCodecAnalyzer:
     def __init__(self, server_url: str, api_key: str):
         self.server_url = server_url.rstrip('/')
         self.api_key = api_key
         self.headers = {'X-Emby-Token': api_key}
+        self.items_cache = None
     
     def test_connection(self) -> bool:
         """Test connection to Jellyfin server"""
@@ -55,6 +64,9 @@ class JellyfinCodecAnalyzer:
     
     def get_all_items(self) -> List[Dict]:
         """Fetch all video items from Jellyfin"""
+        if self.items_cache is not None:
+            return self.items_cache
+            
         items = []
         params = {
             'Recursive': 'true',
@@ -90,6 +102,7 @@ class JellyfinCodecAnalyzer:
             else:
                 print(f"Found {len(items)} video items", file=sys.stderr)
             
+            self.items_cache = items
             return items
             
         except requests.exceptions.ConnectionError:
@@ -109,6 +122,30 @@ class JellyfinCodecAnalyzer:
             print(f"Error fetching items: {type(e).__name__}: {e}", file=sys.stderr)
             return []
     
+    def get_video_codec(self, item: Dict) -> str:
+        """Extract video codec from an item"""
+        media_streams = item.get('MediaStreams', [])
+        for stream in media_streams:
+            if stream.get('Type') == 'Video':
+                codec = stream.get('Codec', 'Unknown').upper()
+                
+                # Map common codec names to standard format
+                codec_map = {
+                    'H264': 'AVC (H.264)',
+                    'HEVC': 'HEVC (H.265)',
+                    'H265': 'HEVC (H.265)',
+                    'VP9': 'VP9',
+                    'VP8': 'VP8',
+                    'AV1': 'AV1',
+                    'MPEG4': 'MPEG-4',
+                    'MPEG2VIDEO': 'MPEG-2',
+                    'VC1': 'VC-1',
+                    'WMV3': 'WMV3',
+                }
+                
+                return codec_map.get(codec, codec)
+        return 'Unknown'
+    
     def analyze_codecs(self, items: List[Dict]) -> Dict[str, int]:
         """Analyze video codecs from items"""
         codec_counter = Counter()
@@ -122,32 +159,11 @@ class JellyfinCodecAnalyzer:
                 items_without_streams += 1
                 continue
             
-            video_stream_found = False
-            for stream in media_streams:
-                if stream.get('Type') == 'Video':
-                    video_stream_found = True
-                    codec = stream.get('Codec', 'Unknown').upper()
-                    
-                    # Map common codec names to standard format
-                    codec_map = {
-                        'H264': 'AVC (H.264)',
-                        'HEVC': 'HEVC (H.265)',
-                        'H265': 'HEVC (H.265)',
-                        'VP9': 'VP9',
-                        'VP8': 'VP8',
-                        'AV1': 'AV1',
-                        'MPEG4': 'MPEG-4',
-                        'MPEG2VIDEO': 'MPEG-2',
-                        'VC1': 'VC-1',
-                        'WMV3': 'WMV3',
-                    }
-                    
-                    codec_name = codec_map.get(codec, codec)
-                    codec_counter[codec_name] += 1
-                    break  # Only count first video stream per item
-            
-            if not video_stream_found:
+            codec = self.get_video_codec(item)
+            if codec == 'Unknown':
                 items_without_codec += 1
+            else:
+                codec_counter[codec] += 1
         
         if items_without_streams > 0:
             print(f"Warning: {items_without_streams} items have no media stream data", file=sys.stderr)
@@ -181,6 +197,40 @@ class JellyfinCodecAnalyzer:
         
         print(f"{'='*50}\n")
     
+    def list_files_by_codec(self, items: List[Dict], codec_filter: str = None):
+        """List all files, optionally filtered by codec"""
+        codec_groups = {}
+        
+        for item in items:
+            codec = self.get_video_codec(item)
+            if codec not in codec_groups:
+                codec_groups[codec] = []
+            
+            name = item.get('Name', 'Unknown')
+            path = item.get('Path', 'No path')
+            codec_groups[codec].append({'name': name, 'path': path})
+        
+        if codec_filter:
+            if codec_filter in codec_groups:
+                print(f"\n{'='*70}")
+                print(f"Files with codec: {codec_filter}")
+                print(f"{'='*70}")
+                for file_info in sorted(codec_groups[codec_filter], key=lambda x: x['name']):
+                    print(f"\n{file_info['name']}")
+                    print(f"  Path: {file_info['path']}")
+                print(f"\n{'='*70}")
+                print(f"Total: {len(codec_groups[codec_filter])} files\n")
+            else:
+                print(f"\nNo files found with codec: {codec_filter}\n")
+        else:
+            for codec in sorted(codec_groups.keys()):
+                print(f"\n{'='*70}")
+                print(f"Codec: {codec} ({len(codec_groups[codec])} files)")
+                print(f"{'='*70}")
+                for file_info in sorted(codec_groups[codec], key=lambda x: x['name']):
+                    print(f"\n{file_info['name']}")
+                    print(f"  Path: {file_info['path']}")
+    
     def save_results(self, codec_stats: Dict[str, int], filename: str, detailed: bool = False):
         """Save results to file"""
         try:
@@ -213,32 +263,149 @@ class JellyfinCodecAnalyzer:
         except Exception as e:
             print(f"Error saving to file: {type(e).__name__}: {e}", file=sys.stderr)
 
+def interactive_mode(analyzer: JellyfinCodecAnalyzer):
+    """Run in interactive mode"""
+    print("\n" + "="*50)
+    print("Jellyfin Codec Analyzer - Interactive Mode")
+    print("="*50)
+    
+    # Fetch items once
+    print("\nFetching media items from Jellyfin...")
+    items = analyzer.get_all_items()
+    
+    if not items:
+        print("No items found. Exiting.")
+        return
+    
+    # Analyze codecs
+    print("Analyzing codecs...")
+    codec_stats = analyzer.analyze_codecs(items)
+    
+    while True:
+        print("\n" + "="*50)
+        print("What would you like to do?")
+        print("="*50)
+        print("1. Show codec statistics")
+        print("2. Show detailed statistics (with percentages)")
+        print("3. List all files by codec")
+        print("4. List files for specific codec")
+        print("5. Save statistics to file")
+        print("6. Exit")
+        print("="*50)
+        
+        try:
+            choice = input("\nEnter your choice (1-6): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\nExiting...")
+            break
+        
+        if choice == '1':
+            analyzer.print_results(codec_stats, detailed=False)
+        
+        elif choice == '2':
+            analyzer.print_results(codec_stats, detailed=True)
+        
+        elif choice == '3':
+            print("\nListing all files by codec...")
+            analyzer.list_files_by_codec(items)
+        
+        elif choice == '4':
+            print("\nAvailable codecs:")
+            for i, codec in enumerate(sorted(codec_stats.keys()), 1):
+                print(f"  {i}. {codec} ({codec_stats[codec]} files)")
+            
+            codec_choice = input("\nEnter codec name or number: ").strip()
+            
+            # Check if input is a number
+            try:
+                codec_num = int(codec_choice)
+                codec_list = sorted(codec_stats.keys())
+                if 1 <= codec_num <= len(codec_list):
+                    codec_filter = codec_list[codec_num - 1]
+                else:
+                    print("Invalid number")
+                    continue
+            except ValueError:
+                codec_filter = codec_choice
+            
+            analyzer.list_files_by_codec(items, codec_filter)
+        
+        elif choice == '5':
+            filename = input("Enter filename (default: codecs.txt): ").strip()
+            if not filename:
+                filename = "codecs.txt"
+            
+            detailed_choice = input("Include percentages? (y/n): ").strip().lower()
+            detailed = detailed_choice in ['y', 'yes']
+            
+            analyzer.save_results(codec_stats, filename, detailed)
+        
+        elif choice == '6':
+            print("\nExiting...")
+            break
+        
+        else:
+            print("\nInvalid choice. Please enter 1-6.")
+
 def main():
+    print("Jellyfin Codec Analyzer starting...", file=sys.stderr)
+    
     parser = argparse.ArgumentParser(
         description='Analyze video codecs in Jellyfin media library',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
   %(prog)s -s http://localhost:8096 -k YOUR_API_KEY
+  %(prog)s -s http://localhost:8096 -k YOUR_API_KEY -i
   %(prog)s -s http://localhost:8096 -k YOUR_API_KEY -d
   %(prog)s -s http://localhost:8096 -k YOUR_API_KEY -o codecs.txt
-  %(prog)s -s http://localhost:8096 -k YOUR_API_KEY -o codecs.txt -d
         '''
     )
     
-    parser.add_argument('-s', '--server', required=True,
-                        help='Jellyfin server URL (e.g., http://localhost:8096)')
-    parser.add_argument('-k', '--api-key', required=True,
-                        help='Jellyfin API key')
+    parser.add_argument('-s', '--server', 
+                        help='Jellyfin server URL (e.g., http://localhost:8096). Can also use JELLYFIN_SERVER env var')
+    parser.add_argument('-k', '--api-key', 
+                        help='Jellyfin API key. Can also use JELLYFIN_API_KEY env var')
+    parser.add_argument('-i', '--interactive', action='store_true',
+                        help='Run in interactive mode')
     parser.add_argument('-o', '--output', 
                         help='Output file to save results')
     parser.add_argument('-d', '--detailed', action='store_true',
                         help='Show detailed statistics with percentages')
+    parser.add_argument('-l', '--list-files', action='store_true',
+                        help='List all files by codec')
+    parser.add_argument('-c', '--codec', 
+                        help='Filter files by specific codec (use with -l)')
     
     args = parser.parse_args()
     
+    # Get server URL from args or environment
+    server = args.server or os.getenv('JELLYFIN_SERVER')
+    if not server:
+        print("Error: Server URL required. Provide via -s or set JELLYFIN_SERVER env var", file=sys.stderr)
+        sys.exit(1)
+    
+    # Get API key from args or environment
+    api_key = args.api_key or os.getenv('JELLYFIN_API_KEY')
+    if not api_key:
+        print("Error: API key required. Provide via -k or set JELLYFIN_API_KEY env var", file=sys.stderr)
+        sys.exit(1)
+    
+    # Validate URL format
+    if not server.startswith(('http://', 'https://')):
+        print(f"Error: Invalid server URL: {server}", file=sys.stderr)
+        print("URL must start with http:// or https://", file=sys.stderr)
+        print(f"Example: http://localhost:8096", file=sys.stderr)
+        sys.exit(1)
+    
+    # Validate API key format (basic check)
+    if len(api_key) < 10:
+        print(f"Error: API key seems too short: {len(api_key)} characters", file=sys.stderr)
+        print("Check that you copied the full API key", file=sys.stderr)
+        sys.exit(1)
+    
     # Initialize analyzer
-    analyzer = JellyfinCodecAnalyzer(args.server, args.api_key)
+    analyzer = JellyfinCodecAnalyzer(server, api_key)
     
     # Test connection
     print("Testing connection to Jellyfin...", file=sys.stderr)
@@ -247,6 +414,11 @@ Examples:
         sys.exit(1)
     
     print("Connection successful!", file=sys.stderr)
+    
+    # Interactive mode
+    if args.interactive:
+        interactive_mode(analyzer)
+        return
     
     # Fetch and analyze items
     print("Fetching media items...", file=sys.stderr)
@@ -258,6 +430,11 @@ Examples:
     
     print("Analyzing codecs...", file=sys.stderr)
     codec_stats = analyzer.analyze_codecs(items)
+    
+    # List files mode
+    if args.list_files:
+        analyzer.list_files_by_codec(items, args.codec)
+        return
     
     # Print results
     analyzer.print_results(codec_stats, args.detailed)

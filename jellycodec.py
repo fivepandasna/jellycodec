@@ -22,6 +22,34 @@ except ImportError:
     print("Note: python-dotenv not installed. Install with: pip install python-dotenv", file=sys.stderr)
     print("Falling back to environment variables or command-line arguments", file=sys.stderr)
 
+def clear_screen():
+    """Clear terminal screen"""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def paginate_output(lines, page_size=20):
+    """Display output with pagination"""
+    if len(lines) <= page_size:
+        for line in lines:
+            print(line)
+        return
+    
+    i = 0
+    while i < len(lines):
+        # Print one page
+        for line in lines[i:i + page_size]:
+            print(line)
+        
+        i += page_size
+        
+        if i < len(lines):
+            try:
+                response = input(f"\n--- More ({len(lines) - i} lines remaining) - Press Enter to continue, 'q' to quit --- ")
+                if response.lower() == 'q':
+                    break
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+
 class JellyfinCodecAnalyzer:
     def __init__(self, server_url: str, api_key: str):
         self.server_url = server_url.rstrip('/')
@@ -259,29 +287,37 @@ class JellyfinCodecAnalyzer:
                 files = codec_groups[codec_filter]
                 total_size = sum(f['size'] for f in files)
                 
-                print(f"\n{'='*70}")
-                print(f"Files with codec: {codec_filter}")
-                print(f"Total: {len(files)} files, {self.format_size(total_size)}")
-                print(f"{'='*70}")
+                lines = []
+                lines.append(f"\n{'='*70}")
+                lines.append(f"Files with codec: {codec_filter}")
+                lines.append(f"Total: {len(files)} files, {self.format_size(total_size)}")
+                lines.append(f"{'='*70}")
+                
                 for file_info in sorted(files, key=lambda x: x['name']):
-                    print(f"\n{file_info['name']}")
-                    print(f"  Size: {self.format_size(file_info['size'])}")
-                    print(f"  Path: {file_info['path']}")
-                print(f"\n{'='*70}\n")
+                    lines.append(f"\n{file_info['name']}")
+                    lines.append(f"  Size: {self.format_size(file_info['size'])}")
+                    lines.append(f"  Path: {file_info['path']}")
+                
+                lines.append(f"\n{'='*70}\n")
+                paginate_output(lines)
             else:
                 print(f"\nNo files found with codec: {codec_filter}\n")
         else:
+            lines = []
             for codec in sorted(codec_groups.keys()):
                 files = codec_groups[codec]
                 total_size = sum(f['size'] for f in files)
                 
-                print(f"\n{'='*70}")
-                print(f"Codec: {codec} ({len(files)} files, {self.format_size(total_size)})")
-                print(f"{'='*70}")
+                lines.append(f"\n{'='*70}")
+                lines.append(f"Codec: {codec} ({len(files)} files, {self.format_size(total_size)})")
+                lines.append(f"{'='*70}")
+                
                 for file_info in sorted(files, key=lambda x: x['name']):
-                    print(f"\n{file_info['name']}")
-                    print(f"  Size: {self.format_size(file_info['size'])}")
-                    print(f"  Path: {file_info['path']}")
+                    lines.append(f"\n{file_info['name']}")
+                    lines.append(f"  Size: {self.format_size(file_info['size'])}")
+                    lines.append(f"  Path: {file_info['path']}")
+            
+            paginate_output(lines)
     
     def save_results(self, codec_data: Dict[str, Dict], filename: str, detailed: bool = False):
         """Save codec statistics to file"""
@@ -382,7 +418,8 @@ class JellyfinCodecAnalyzer:
 
 def interactive_mode(analyzer: JellyfinCodecAnalyzer):
     """Run in interactive mode"""
-    print("\n" + "="*50)
+    clear_screen()
+    print("="*50)
     print("Jellyfin Codec Analyzer - Interactive Mode")
     print("="*50)
     
@@ -399,10 +436,13 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
     codec_stats = analyzer.analyze_codecs(items)
     
     while True:
-        print("\n" + "="*50)
-        print("What would you like to do?")
+        clear_screen()
         print("="*50)
-        print("1. Show codec statistics")
+        print("Jellyfin Codec Analyzer")
+        print("="*50)
+        print(f"Library: {len(items)} videos | {len(codec_stats)} codecs")
+        print("="*50)
+        print("\n1. Show codec statistics")
         print("2. Show detailed statistics (with percentages)")
         print("3. List all files by codec")
         print("4. List files for specific codec")
@@ -417,17 +457,24 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
             break
         
         if choice == '1':
+            clear_screen()
             analyzer.print_results(codec_stats, detailed=False)
+            input("\nPress Enter to continue...")
         
         elif choice == '2':
+            clear_screen()
             analyzer.print_results(codec_stats, detailed=True)
+            input("\nPress Enter to continue...")
         
         elif choice == '3':
-            print("\nListing all files by codec...")
+            clear_screen()
+            print("Listing all files by codec...\n")
             analyzer.list_files_by_codec(items)
+            input("\nPress Enter to continue...")
         
         elif choice == '4':
-            print("\nAvailable codecs:")
+            clear_screen()
+            print("Available codecs:\n")
             for i, codec in enumerate(sorted(codec_stats.keys()), 1):
                 count = codec_stats[codec]['count']
                 size = codec_stats[codec]['total_size']
@@ -443,13 +490,17 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
                     codec_filter = codec_list[codec_num - 1]
                 else:
                     print("Invalid number")
+                    input("\nPress Enter to continue...")
                     continue
             except ValueError:
                 codec_filter = codec_choice
             
+            clear_screen()
             analyzer.list_files_by_codec(items, codec_filter)
+            input("\nPress Enter to continue...")
         
         elif choice == '5':
+            clear_screen()
             filename = input("Enter filename (default: files.csv): ").strip()
             if not filename:
                 filename = "files.csv"
@@ -478,6 +529,7 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
             
             if save_choice == '1':
                 analyzer.save_file_list(items, filename, format_type=format_type)
+                input("\nPress Enter to continue...")
             elif save_choice == '2':
                 print("\nAvailable codecs:")
                 for i, codec in enumerate(sorted(codec_stats.keys()), 1):
@@ -495,20 +547,25 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
                         codec_filter = codec_list[codec_num - 1]
                     else:
                         print("Invalid number")
+                        input("\nPress Enter to continue...")
                         continue
                 except ValueError:
                     codec_filter = codec_choice
                 
                 analyzer.save_file_list(items, filename, codec_filter, format_type=format_type)
+                input("\nPress Enter to continue...")
             else:
                 print("Invalid choice")
+                input("\nPress Enter to continue...")
         
         elif choice == '6':
+            clear_screen()
             print("\nExiting...")
             break
         
         else:
             print("\nInvalid choice. Please enter 1-6.")
+            input("\nPress Enter to continue...")
 
 def main():
     print("Jellyfin Codec Analyzer starting...", file=sys.stderr)

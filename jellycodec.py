@@ -235,7 +235,7 @@ class JellyfinCodecAnalyzer:
                     print(f"  Path: {file_info['path']}")
     
     def save_results(self, codec_stats: Dict[str, int], filename: str, detailed: bool = False):
-        """Save results to file"""
+        """Save codec statistics to file"""
         try:
             with open(filename, 'w') as f:
                 total = sum(codec_stats.values())
@@ -256,6 +256,53 @@ class JellyfinCodecAnalyzer:
                 f.write(f"{'='*50}\n")
             
             print(f"Results saved to {filename}")
+        except PermissionError:
+            print(f"Error: Permission denied writing to {filename}", file=sys.stderr)
+            print("Check file permissions or try a different location", file=sys.stderr)
+        except IsADirectoryError:
+            print(f"Error: {filename} is a directory, not a file", file=sys.stderr)
+        except OSError as e:
+            print(f"Error saving file: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"Error saving to file: {type(e).__name__}: {e}", file=sys.stderr)
+    
+    def save_file_list(self, items: List[Dict], filename: str, codec_filter: str = None):
+        """Save file list to file"""
+        try:
+            with open(filename, 'w') as f:
+                codec_groups = {}
+                
+                for item in items:
+                    codec = self.get_video_codec(item)
+                    if codec not in codec_groups:
+                        codec_groups[codec] = []
+                    
+                    name = item.get('Name', 'Unknown')
+                    path = item.get('Path', 'No path')
+                    codec_groups[codec].append({'name': name, 'path': path})
+                
+                if codec_filter:
+                    if codec_filter in codec_groups:
+                        f.write(f"{'='*70}\n")
+                        f.write(f"Files with codec: {codec_filter}\n")
+                        f.write(f"{'='*70}\n")
+                        for file_info in sorted(codec_groups[codec_filter], key=lambda x: x['name']):
+                            f.write(f"\n{file_info['name']}\n")
+                            f.write(f"  Path: {file_info['path']}\n")
+                        f.write(f"\n{'='*70}\n")
+                        f.write(f"Total: {len(codec_groups[codec_filter])} files\n")
+                    else:
+                        f.write(f"No files found with codec: {codec_filter}\n")
+                else:
+                    for codec in sorted(codec_groups.keys()):
+                        f.write(f"\n{'='*70}\n")
+                        f.write(f"Codec: {codec} ({len(codec_groups[codec])} files)\n")
+                        f.write(f"{'='*70}\n")
+                        for file_info in sorted(codec_groups[codec], key=lambda x: x['name']):
+                            f.write(f"\n{file_info['name']}\n")
+                            f.write(f"  Path: {file_info['path']}\n")
+            
+            print(f"File list saved to {filename}")
         except PermissionError:
             print(f"Error: Permission denied writing to {filename}", file=sys.stderr)
             print("Check file permissions or try a different location", file=sys.stderr)
@@ -292,7 +339,7 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
         print("2. Show detailed statistics (with percentages)")
         print("3. List all files by codec")
         print("4. List files for specific codec")
-        print("5. Save statistics to file")
+        print("5. Save file list to file")
         print("6. Exit")
         print("="*50)
         
@@ -334,14 +381,40 @@ def interactive_mode(analyzer: JellyfinCodecAnalyzer):
             analyzer.list_files_by_codec(items, codec_filter)
         
         elif choice == '5':
-            filename = input("Enter filename (default: codecs.txt): ").strip()
+            filename = input("Enter filename (default: files.txt): ").strip()
             if not filename:
-                filename = "codecs.txt"
+                filename = "files.txt"
             
-            detailed_choice = input("Include percentages? (y/n): ").strip().lower()
-            detailed = detailed_choice in ['y', 'yes']
+            print("\nSave options:")
+            print("1. All files (all codecs)")
+            print("2. Specific codec only")
             
-            analyzer.save_results(codec_stats, filename, detailed)
+            save_choice = input("\nEnter choice (1-2): ").strip()
+            
+            if save_choice == '1':
+                analyzer.save_file_list(items, filename)
+            elif save_choice == '2':
+                print("\nAvailable codecs:")
+                for i, codec in enumerate(sorted(codec_stats.keys()), 1):
+                    print(f"  {i}. {codec} ({codec_stats[codec]} files)")
+                
+                codec_choice = input("\nEnter codec name or number: ").strip()
+                
+                # Check if input is a number
+                try:
+                    codec_num = int(codec_choice)
+                    codec_list = sorted(codec_stats.keys())
+                    if 1 <= codec_num <= len(codec_list):
+                        codec_filter = codec_list[codec_num - 1]
+                    else:
+                        print("Invalid number")
+                        continue
+                except ValueError:
+                    codec_filter = codec_choice
+                
+                analyzer.save_file_list(items, filename, codec_filter)
+            else:
+                print("Invalid choice")
         
         elif choice == '6':
             print("\nExiting...")

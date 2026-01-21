@@ -13,8 +13,8 @@ The primary intended use of this tool is to find your biggest files using ineffi
 Requirements
 ------------
 - Python 3.6+
-- Linux or Unix-like system (macOS, BSD, etc.)
 - Jellyfin server with API access
+- Linux, macOS, or Windows
 
 Installation
 ------------
@@ -36,6 +36,8 @@ The script reads the Jellyfin server URL and API key from environment variables 
 
 **Set environment variables:**
 
+### Linux, macOS, and Unix-like systems
+
 ```bash
 export JELLYFIN_SERVER=http://localhost:8096
 export JELLYFIN_API_KEY=your_api_key_here
@@ -46,6 +48,27 @@ To make them persistent, add the export commands to your shell configuration fil
 Then reload your shell configuration:
 ```bash
 source ~/.bashrc  # or ~/.zshrc or ~/.profile, depending on your shell
+```
+### Windows
+
+**PowerShell:**
+```powershell
+$env:JELLYFIN_SERVER = "http://localhost:8096"
+$env:JELLYFIN_API_KEY = "your_api_key_here"
+```
+
+**Command Prompt (cmd):**
+```cmd
+set JELLYFIN_SERVER=http://localhost:8096
+set JELLYFIN_API_KEY=your_api_key_here
+```
+
+To make them persistent across sessions, set them as system or user environment variables:
+
+**Using PowerShell (persistent):**
+```powershell
+[System.Environment]::SetEnvironmentVariable('JELLYFIN_SERVER', 'http://localhost:8096', 'User')
+[System.Environment]::SetEnvironmentVariable('JELLYFIN_API_KEY', 'your_api_key_here', 'User')
 ```
 
 **Getting your Jellyfin API Key:**

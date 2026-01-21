@@ -11,18 +11,24 @@ The primary intended use of this tool is to find your biggest files using ineffi
 - Save summary or per-file lists to CSV or JSON
 - Interactive TUI-style mode for quick exploration
 
-**Requirements**
-- Python 3.8+
-- `requests` (for HTTP requests to Jellyfin)
-- `python-dotenv` (optional — automatically loads `.env` file if installed)
 
-Install dependencies (recommended inside a virtualenv):
+
+Installation
+------------
+
+The recommended installation method is via PyPI:
 
 ```bash
-pip install -r requirements.txt
-# Or install packages individually:
-# pip install requests python-dotenv
+pip install jellycodec
 ```
+
+If you're working from the repository (developer or local install), install with:
+
+```bash
+pip install .
+```
+
+After installation the `jellycodec` command will be available on your PATH; run it with `jellycodec -h` for usage.
 
 **Configuration**
 
@@ -95,21 +101,11 @@ The interactive flow is useful when you want to quickly inspect which files use 
 - File lists can be saved in CSV (recommended) or JSON formats.
 - The script attempts to use `MediaSources` entry to determine file sizes; when size information is missing the size will be reported as `Unknown`.
 
-**Notes & Error Handling**
-
-- The script performs basic HTTP error handling (401/403/404/500 and connection/timeouts) and prints helpful guidance to `stderr`.
-- Ensure the API key has sufficient permissions to read library items.
-- The tool requests the `Items` endpoint with `Recursive=true` and `IncludeItemTypes=Movie,Episode` to fetch media streams.
-
 **Development & Contributing**
 
 Contributions and improvements welcome. Open an issue or submit a pull request with fixes or enhancements (e.g., support for additional item types, more robust size detection, or unit tests).
 
 **License**
 
-This repository does not include a license file. Add a license of choice if you intend to share publicly.
-
----
-
-File: [jellycodec.py](jellycodec.py)
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 

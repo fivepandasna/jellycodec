@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jellycodec"
+version = "0.1.0"
+description = "Jellyfin Codec Analyzer — analyze video codecs in your Jellyfin library"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [ { name = "Ashaan Dalgliesh", email = "ashaandalgliesh@gmail.com" } ]
+classifiers = [
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3 :: Only",
+	"License :: OSI Approved :: MIT License",
+	"Operating System :: OS Independent",
+]
+dependencies = [
+	"requests>=2.25.1",
+	"python-dotenv>=0.19.0",
+]
+
+[project.scripts]
+jellycodec = "jellycodec:main"
+
